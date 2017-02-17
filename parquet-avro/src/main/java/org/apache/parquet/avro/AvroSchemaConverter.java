@@ -52,6 +52,8 @@ public class AvroSchemaConverter {
   private final boolean assumeRepeatedIsListElement;
   private final boolean writeOldListStructure;
 
+  private final int MAX_DEPTH = 8;
+
   public AvroSchemaConverter() {
     this.assumeRepeatedIsListElement = ADD_LIST_ELEMENT_RECORDS_DEFAULT;
     this.writeOldListStructure = WRITE_OLD_LIST_STRUCTURE_DEFAULT;
@@ -94,25 +96,29 @@ public class AvroSchemaConverter {
     if (!avroSchema.getType().equals(Schema.Type.RECORD)) {
       throw new IllegalArgumentException("Avro schema must be a record.");
     }
-    return new MessageType(avroSchema.getFullName(), convertFields(avroSchema.getFields()));
+    return new MessageType(avroSchema.getFullName(), convertFields(avroSchema.getFields(), MAX_DEPTH));
   }
 
-  private List<Type> convertFields(List<Schema.Field> fields) {
+  private List<Type> convertFields(List<Schema.Field> fields, int depth) {
     List<Type> types = new ArrayList<Type>();
+    if (depth <= 0) {
+      return types;
+    }
+    depth--;
     for (Schema.Field field : fields) {
       if (field.schema().getType().equals(Schema.Type.NULL)) {
         continue; // Avro nulls are not encoded, unless they are null unions
       }
-      types.add(convertField(field));
+      types.add(convertField(field, depth));
     }
     return types;
   }
 
-  private Type convertField(String fieldName, Schema schema) {
-    return convertField(fieldName, schema, Type.Repetition.REQUIRED);
+  private Type convertField(String fieldName, Schema schema, int depth) {
+    return convertField(fieldName, schema, Type.Repetition.REQUIRED, depth);
   }
 
-  private Type convertField(String fieldName, Schema schema, Type.Repetition repetition) {
+  private Type convertField(String fieldName, Schema schema, Type.Repetition repetition, int depth) {
     Schema.Type type = schema.getType();
     if (type.equals(Schema.Type.BOOLEAN)) {
       return primitive(fieldName, BOOLEAN, repetition);
@@ -129,31 +135,35 @@ public class AvroSchemaConverter {
     } else if (type.equals(Schema.Type.STRING)) {
       return primitive(fieldName, BINARY, repetition, UTF8);
     } else if (type.equals(Schema.Type.RECORD)) {
-      return new GroupType(repetition, fieldName, convertFields(schema.getFields()));
+      if (depth <= 0) {
+        return primitive(fieldName, BINARY, repetition, UTF8);
+      } else {
+        return new GroupType(repetition, fieldName, convertFields(schema.getFields(), depth));
+      }
     } else if (type.equals(Schema.Type.ENUM)) {
       return primitive(fieldName, BINARY, repetition, ENUM);
     } else if (type.equals(Schema.Type.ARRAY)) {
       if (writeOldListStructure) {
         return ConversionPatterns.listType(repetition, fieldName,
-            convertField("array", schema.getElementType(), Type.Repetition.REPEATED));
+            convertField("array", schema.getElementType(), Type.Repetition.REPEATED, depth));
       } else {
         return ConversionPatterns.listOfElements(repetition, fieldName,
-            convertField(AvroWriteSupport.LIST_ELEMENT_NAME, schema.getElementType()));
+            convertField(AvroWriteSupport.LIST_ELEMENT_NAME, schema.getElementType(), depth));
       }
     } else if (type.equals(Schema.Type.MAP)) {
-      Type valType = convertField("value", schema.getValueType());
+      Type valType = convertField("value", schema.getValueType(), depth);
       // avro map key type is always string
       return ConversionPatterns.stringKeyMapType(repetition, fieldName, valType);
     } else if (type.equals(Schema.Type.FIXED)) {
       return primitive(fieldName, FIXED_LEN_BYTE_ARRAY, repetition,
                        schema.getFixedSize(), null);
     } else if (type.equals(Schema.Type.UNION)) {
-      return convertUnion(fieldName, schema, repetition);
+      return convertUnion(fieldName, schema, repetition, depth);
     }
     throw new UnsupportedOperationException("Cannot convert Avro type " + type);
   }
 
-  private Type convertUnion(String fieldName, Schema schema, Type.Repetition repetition) {
+  private Type convertUnion(String fieldName, Schema schema, Type.Repetition repetition, int depth) {
     List<Schema> nonNullSchemas = new ArrayList(schema.getTypes().size());
     for (Schema childSchema : schema.getTypes()) {
       if (childSchema.getType().equals(Schema.Type.NULL)) {
@@ -171,20 +181,20 @@ public class AvroSchemaConverter {
         throw new UnsupportedOperationException("Cannot convert Avro union of only nulls");
 
       case 1:
-        return convertField(fieldName, nonNullSchemas.get(0), repetition);
+        return convertField(fieldName, nonNullSchemas.get(0), repetition, depth);
 
       default: // complex union type
         List<Type> unionTypes = new ArrayList(nonNullSchemas.size());
         int index = 0;
         for (Schema childSchema : nonNullSchemas) {
-          unionTypes.add( convertField("member" + index++, childSchema, Type.Repetition.OPTIONAL));
+          unionTypes.add( convertField("member" + index++, childSchema, Type.Repetition.OPTIONAL, depth));
         }
         return new GroupType(repetition, fieldName, unionTypes);
     }
   }
 
-  private Type convertField(Schema.Field field) {
-    return convertField(field.name(), field.schema());
+  private Type convertField(Schema.Field field, int depth) {
+    return convertField(field.name(), field.schema(), depth);
   }
 
   private PrimitiveType primitive(String name,
