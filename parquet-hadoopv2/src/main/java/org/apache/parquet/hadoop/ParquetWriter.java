@@ -319,6 +319,11 @@ public class ParquetWriter<T> implements Closeable {
     return writer.flush();
   }
 
+  public byte[] getFooter() throws IOException
+  {
+    return writer.getFooter();
+  }
+
   public FSDataOutputStream getStream() {
     return writer.getStream();
   }

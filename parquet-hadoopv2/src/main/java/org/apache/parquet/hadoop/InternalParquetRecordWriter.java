@@ -24,6 +24,7 @@ import static java.lang.String.format;
 import static org.apache.parquet.Log.DEBUG;
 import static org.apache.parquet.Preconditions.checkNotNull;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -118,6 +119,16 @@ class InternalParquetRecordWriter<T> {
     parquetFileWriter.end(finalMetadata);
   }
 
+  public byte[] getFooter() throws IOException
+  {
+    FinalizedWriteContext finalWriteContext = writeSupport.finalizeWrite();
+    Map<String, String> finalMetadata = new HashMap<String, String>(extraMetaData);
+    finalMetadata.putAll(finalWriteContext.getExtraMetaData());
+    ByteArrayOutputStream footer = new ByteArrayOutputStream();
+    parquetFileWriter.getFooter(finalMetadata, footer);
+    return footer.toByteArray();
+  }
+
   public void write(T value) throws IOException, InterruptedException {
     writeSupport.write(value);
     ++ recordCount;
@@ -178,19 +189,17 @@ class InternalParquetRecordWriter<T> {
   public long flush() throws IOException
   {
     long memSize = columnStore.getBufferedSize();
-    LOG.info(format("mem size %,d > %,d: flushing %,d records to disk.", memSize, nextRowGroupSize, recordCount));
+    LOG.info(format("Flushing %,d records to disk, mem size %,d.", recordCount, memSize));
     flushRowGroupToStore();
     initStore();
     recordCountForNextMemCheck = min(max(MINIMUM_RECORD_COUNT_FOR_CHECK, recordCount / 2), MAXIMUM_RECORD_COUNT_FOR_CHECK);
-//    parquetFileWriter.sync();
     this.lastRowGroupEndPos = parquetFileWriter.getPos();
     return this.lastRowGroupEndPos;
   }
 
   public long getPos() throws IOException
   {
-//    parquetFileWriter.sync();
-    return parquetFileWriter.getPos();
+    return this.lastRowGroupEndPos;
   }
 
   public FSDataOutputStream getStream() {

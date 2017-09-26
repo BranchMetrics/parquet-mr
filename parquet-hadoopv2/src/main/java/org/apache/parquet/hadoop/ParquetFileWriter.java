@@ -23,6 +23,7 @@ import static org.apache.parquet.format.Util.writeFileMetaData;
 import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE;
 import static org.apache.parquet.hadoop.ParquetWriter.MAX_PADDING_SIZE_DEFAULT;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -480,12 +481,27 @@ public class ParquetFileWriter {
     out.close();
   }
 
+  public void getFooter(Map<String, String> extraMetaData, ByteArrayOutputStream out) throws IOException {
+    ParquetMetadata footer = new ParquetMetadata(new FileMetaData(schema, extraMetaData, Version.FULL_VERSION), blocks);
+    serializeFooter(footer, out);
+    out.close();
+  }
+
   private static void serializeFooter(ParquetMetadata footer, FSDataOutputStream out) throws IOException {
     long footerIndex = out.getPos();
     org.apache.parquet.format.FileMetaData parquetMetadata = metadataConverter.toParquetMetadata(CURRENT_VERSION, footer);
     writeFileMetaData(parquetMetadata, out);
     if (DEBUG) LOG.debug(out.getPos() + ": footer length = " + (out.getPos() - footerIndex));
     BytesUtils.writeIntLittleEndian(out, (int)(out.getPos() - footerIndex));
+    out.write(MAGIC);
+  }
+
+  private static void serializeFooter(ParquetMetadata footer, ByteArrayOutputStream out) throws IOException {
+    long footerIndex = out.size();
+    org.apache.parquet.format.FileMetaData parquetMetadata = metadataConverter.toParquetMetadata(CURRENT_VERSION, footer);
+    writeFileMetaData(parquetMetadata, out);
+    if (DEBUG) LOG.debug(out.size() + ": footer length = " + (out.size() - footerIndex));
+    BytesUtils.writeIntLittleEndian(out, (int)(out.size() - footerIndex));
     out.write(MAGIC);
   }
 
