@@ -30,7 +30,6 @@ import org.apache.parquet.hadoop.ParquetOutputFormat.JobSummaryLevel;
 import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
-import org.apache.parquet.Log;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Encoding;
@@ -68,10 +67,12 @@ import org.apache.parquet.example.data.simple.SimpleGroup;
 import org.apache.parquet.hadoop.example.GroupWriteSupport;
 import org.junit.rules.TemporaryFolder;
 import org.mockito.Mockito;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TestParquetFileWriter {
 
-  private static final Log LOG = Log.getLog(TestParquetFileWriter.class);
+  private static final Logger LOG = LoggerFactory.getLogger(TestParquetFileWriter.class);
 
   private static final MessageType SCHEMA = MessageTypeParser.parseMessageType("" +
       "message m {" +
@@ -594,21 +595,22 @@ public class TestParquetFileWriter {
     GroupWriteSupport.setSchema(schema, configuration);
 
     ParquetWriter<Group> writer = new ParquetWriter<Group>(path, configuration, new GroupWriteSupport());
-   
+
     Group r1 = new SimpleGroup(schema);
     writer.write(r1);
     writer.close();
-    
+
     ParquetMetadata readFooter = ParquetFileReader.readFooter(configuration, path);
-    
+
     // assert the statistics object is not empty
-    assertTrue((readFooter.getBlocks().get(0).getColumns().get(0).getStatistics().isEmpty()) == false);
+    org.apache.parquet.column.statistics.Statistics stats = readFooter.getBlocks().get(0).getColumns().get(0).getStatistics();
+    assertFalse("is empty: " + stats, stats.isEmpty());
     // assert the number of nulls are correct for the first block
-    assertEquals(1, (readFooter.getBlocks().get(0).getColumns().get(0).getStatistics().getNumNulls()));
+    assertEquals("nulls: " + stats, 1, stats.getNumNulls());
   }
 
   private void validateFooters(final List<Footer> metadata) {
-    LOG.debug(metadata);
+    LOG.debug("{}", metadata);
     assertEquals(String.valueOf(metadata), 3, metadata.size());
     for (Footer footer : metadata) {
       final File file = new File(footer.getFile().toUri());
