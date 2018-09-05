@@ -23,9 +23,11 @@ import static java.lang.Math.min;
 import static java.lang.String.format;
 import static org.apache.parquet.Preconditions.checkNotNull;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import org.apache.parquet.Log;
 
 import org.apache.parquet.column.ColumnWriteStore;
 import org.apache.parquet.column.ParquetProperties;
@@ -152,6 +154,35 @@ class InternalParquetRecordWriter<T> {
         LOG.debug("Checked mem at {} will check again at: {}", recordCount, recordCountForNextMemCheck);
       }
     }
+  }
+
+
+  public long flush() throws IOException
+  {
+    flushRowGroupToStore();
+    // initStore is needed here to initialize columnStore while flushing
+    initStore();
+    recordCountForNextMemCheck = min(max(MINIMUM_RECORD_COUNT_FOR_CHECK, recordCount / 2), MAXIMUM_RECORD_COUNT_FOR_CHECK);
+    this.lastRowGroupEndPos = parquetFileWriter.getPos();
+    return this.lastRowGroupEndPos;
+  }
+
+  public long getPos() throws IOException
+  {
+    return  this.lastRowGroupEndPos;
+  }
+
+  public byte[] getFooter() throws IOException {
+    FinalizedWriteContext finalWriteContext = writeSupport.finalizeWrite();
+    Map<String, String> finalMetadata = new HashMap<String, String>(extraMetaData);
+    String modelName = writeSupport.getName();
+    if (modelName != null) {
+      finalMetadata.put(ParquetWriter.OBJECT_MODEL_NAME_PROP, modelName);
+    }
+    finalMetadata.putAll(finalWriteContext.getExtraMetaData());
+    ByteArrayOutputStream footer = new ByteArrayOutputStream();
+    parquetFileWriter.getFooter(finalMetadata, footer);
+    return footer.toByteArray();
   }
 
   private void flushRowGroupToStore()
